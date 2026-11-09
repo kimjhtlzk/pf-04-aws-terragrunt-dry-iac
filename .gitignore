@@ -1,0 +1,22 @@
+# Secrets and credentials
+.env
+.env.*
+!.env.example
+credentials*
+*.pem
+*.key
+*service-account*.json
+*-key.json
+
+.DS_Store
+
+# Terraform / Terragrunt
+.terraform/
+.terragrunt-cache/
+.state/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.example.tfvars
+crash.log
+.terraform.lock.hcl

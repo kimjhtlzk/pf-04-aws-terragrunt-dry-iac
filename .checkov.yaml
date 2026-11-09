@@ -1,0 +1,6 @@
+directory:
+  - modules
+framework:
+  - terraform
+quiet: true
+compact: true

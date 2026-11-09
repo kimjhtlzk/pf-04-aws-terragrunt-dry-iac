@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  TERRAFORM_VERSION: 1.9.8
+  TERRAGRUNT_VERSION: 0.60.0
+  TFLINT_VERSION: v0.55.1
+  TERRAFORM_DOCS_VERSION: 0.24.0
+  CHECKOV_VERSION: 3.4.3
+  GITLEAKS_VERSION: 8.30.1
+  TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.plugin-cache
+  TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE: 'true'
+
+jobs:
+  terraform:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+      - name: terraform validate
+        run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          for dir in modules/*/; do
+            echo "::group::$dir"
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+            echo "::endgroup::"
+          done
+      - name: tflint
+        run: tflint --recursive --config "$GITHUB_WORKSPACE/.tflint.hcl"
+      - name: checkov
+        run: |
+          pip install "checkov==$CHECKOV_VERSION"
+          checkov --config-file .checkov.yaml
+      - name: terraform-docs is current
+        run: |
+          curl -fsSL "https://github.com/terraform-docs/terraform-docs/releases/download/v${TERRAFORM_DOCS_VERSION}/terraform-docs-v${TERRAFORM_DOCS_VERSION}-linux-amd64.tar.gz" | tar -xz terraform-docs
+          for dir in modules/*/; do
+            ./terraform-docs -c .terraform-docs.yml --output-check "$dir"
+          done
+
+  terragrunt:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: Install Terragrunt
+        run: |
+          curl -fsSL -o terragrunt "https://github.com/gruntwork-io/terragrunt/releases/download/v${TERRAGRUNT_VERSION}/terragrunt_linux_amd64"
+          chmod +x terragrunt
+          sudo mv terragrunt /usr/local/bin/terragrunt
+      - name: terragrunt hclfmt
+        run: terragrunt hclfmt --terragrunt-check --terragrunt-working-dir live
+      - name: terragrunt run-all validate
+        run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          terragrunt run-all validate --terragrunt-non-interactive --terragrunt-parallelism 1 --terragrunt-working-dir live/dev
+
+  gitleaks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        run: |
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz gitleaks
+          ./gitleaks detect --source . --config .gitleaks.toml --redact -v
